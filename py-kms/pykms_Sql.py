@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 
 import datetime
 import os
@@ -25,6 +25,7 @@ def sql_initialize(dbName):
                         con = sqlite3.connect(dbName)
                         cur = con.cursor()
                         cur.execute("CREATE TABLE clients(clientMachineId TEXT , machineName TEXT, applicationId TEXT, skuId TEXT, licenseStatus TEXT, lastRequestTime INTEGER, kmsEpid TEXT, requestCount INTEGER, PRIMARY KEY(clientMachineId, applicationId))")
+                        cur.execute("CREATE TABLE activations(clientMachineId TEXT PRIMARY KEY, skuId TEXT, activationTime INTEGER)")
 
                 except sqlite3.Error as e:
                         pretty_printer(log_obj = loggersrv.error, to_exit = True, put_text = "{reverse}{red}{bold}Sqlite Error: %s. Exiting...{end}" %str(e))
@@ -119,3 +120,30 @@ clientMachineId=? AND applicationId=?;", (str(response["kmsEpid"].decode('utf-16
                 if con:
                         con.commit()
                         con.close()
+
+# BU FONKSİYONLARI DOSYANIN SONUNA EKLEYİN:
+def sql_get_activations_count(dbName):
+    with sqlite3.connect(dbName) as con:
+        cur = con.cursor()
+        cur.execute("SELECT COUNT(*) FROM activations")
+        return cur.fetchone()[0]
+
+def sql_get_client_activation(dbName, clientMachineId):
+    with sqlite3.connect(dbName) as con:
+        cur = con.cursor()
+        cur.execute("SELECT * FROM activations WHERE clientMachineId=?", (clientMachineId,))
+        return cur.fetchone()
+
+def sql_add_client_activation(dbName, clientMachineId, skuId, activationTime):
+    with sqlite3.connect(dbName) as con:
+        cur = con.cursor()
+        cur.execute("INSERT INTO activations (clientMachineId, skuId, activationTime) VALUES (?, ?, ?)",
+                    (clientMachineId, skuId, activationTime))
+        con.commit()
+
+def sql_update_client_activation_time(dbName, clientMachineId, activationTime):
+    with sqlite3.connect(dbName) as con:
+        cur = con.cursor()
+        cur.execute("UPDATE activations SET activationTime=? WHERE clientMachineId=?",
+                    (activationTime, clientMachineId))
+        con.commit()

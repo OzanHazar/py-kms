@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 
 import binascii
 import logging
@@ -9,7 +9,7 @@ from pykms_Structure import Structure
 from pykms_DB2Dict import kmsDB2Dict
 from pykms_PidGenerator import epidGenerator
 from pykms_Filetimes import filetime_to_dt
-from pykms_Sql import sql_update, sql_update_epid
+from pykms_Sql import sql_update, sql_update_epid, sql_get_activations_count, sql_get_client_activation, sql_add_client_activation, sql_update_client_activation_time
 from pykms_Format import justify, byterize, enco, deco, pretty_printer
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -110,8 +110,34 @@ class kmsBase:
                 kmsRequest = byterize(kmsRequest)
                 loggersrv.debug("KMS Request Bytes: \n%s\n" % justify(deco(binascii.b2a_hex(enco(str(kmsRequest), 'latin-1')), 'latin-1')))                         
                 loggersrv.debug("KMS Request: \n%s\n" % justify(kmsRequest.dump(print_to_stdout = False)))
-                                        
+
+        # --------------------------------------------------------------------
+        # BURADAN İTİBAREN YENİ KOD BLOĞUNU EKLEYİN
+        # --------------------------------------------------------------------
                 clientMachineId = kmsRequest['clientMachineId'].get()
+
+        # Activation limit check
+                if self.srv_config['sqlite']:
+                    activations_count = sql_get_activations_count(self.srv_config['sqlite'])
+                    client_activated = sql_get_client_activation(self.srv_config['sqlite'], str(clientMachineId))
+
+                if activations_count >= 1 and not client_activated:
+                        loggersrv.warning(f"Activation limit of 40 clients reached. Denying new client: {clientMachineId}")
+                        # Returning None will cause the server to not send a response
+                        return None
+
+                if client_activated:
+                        # Client is already activated, update activation time
+                        sql_update_client_activation_time(self.srv_config['sqlite'], str(clientMachineId), int(time.time()))
+                else:
+                        # New client, add to activations table
+                        sql_add_client_activation(self.srv_config['sqlite'], str(clientMachineId), str(kmsRequest['skuId'].get()), int(time.time()))
+        # --------------------------------------------------------------------
+        # YENİ KOD BLOĞUNUN SONU
+        # --------------------------------------------------------------------
+
+        # Mevcut kod buradan devam ediyor...
+                                        
                 applicationId = kmsRequest['applicationId'].get()
                 skuId = kmsRequest['skuId'].get()
                 requestDatetime = filetime_to_dt(kmsRequest['requestTime'])
