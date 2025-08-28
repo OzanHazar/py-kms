@@ -9,7 +9,7 @@ from pykms_Structure import Structure
 from pykms_DB2Dict import kmsDB2Dict
 from pykms_PidGenerator import epidGenerator
 from pykms_Filetimes import filetime_to_dt
-from pykms_Sql import sql_update, sql_update_epid, sql_get_activations_count, sql_get_client_activation, sql_add_client_activation, sql_update_client_activation_time
+from pykms_Sql import sql_update, sql_update_epid, sql_get_client_activation, sql_add_client_activation, sql_update_client_activation_time, sql_get_sku_limit, sql_count_activations_by_sku
 from pykms_Format import justify, byterize, enco, deco, pretty_printer
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -115,31 +115,35 @@ class kmsBase:
         # BURADAN İTİBAREN YENİ KOD BLOĞUNU EKLEYİN
         # --------------------------------------------------------------------
                 clientMachineId = kmsRequest['clientMachineId'].get()
+                skuId = kmsRequest['skuId'].get()
 
-        # Activation limit check
+                # Activation limit check
                 if self.srv_config['sqlite']:
-                    activations_count = sql_get_activations_count(self.srv_config['sqlite'])
                     client_activated = sql_get_client_activation(self.srv_config['sqlite'], str(clientMachineId))
 
-                if activations_count >= 1 and not client_activated:
-                        loggersrv.warning(f"Activation limit of 40 clients reached. Denying new client: {clientMachineId}")
-                        # Returning None will cause the server to not send a response
-                        return None
+                # Sadece YENİ istemciler için limit kontrolü yap
+                if not client_activated:
+                    # Bu SkuId için limiti veritabanından al (özel limit yoksa varsayılanı döner)
+                    limit_for_sku = sql_get_sku_limit(self.srv_config['sqlite'], str(skuId))
 
+                # Eğer bir limit tanımlıysa kontrol et
+                if limit_for_sku is not None:
+                    # Bu SkuId için mevcut aktivasyon sayısını al
+                    current_activations_for_sku = sql_count_activations_by_sku(self.srv_config['sqlite'], str(skuId))
+
+                if current_activations_for_sku >= limit_for_sku:
+                    loggersrv.warning(f"Activation limit of {limit_for_sku} for SkuId '{skuId}' reached. Denying new client: {clientMachineId}")
+                    return None # İsteği yanıtsız bırak
+
+                # Limit kontrolünü geçtiyse veya mevcut bir istemciyse, aktivasyon/güncelleme yap
                 if client_activated:
-                        # Client is already activated, update activation time
-                        sql_update_client_activation_time(self.srv_config['sqlite'], str(clientMachineId), int(time.time()))
+                    sql_update_client_activation_time(self.srv_config['sqlite'], str(clientMachineId), int(time.time()))
                 else:
-                        # New client, add to activations table
-                        sql_add_client_activation(self.srv_config['sqlite'], str(clientMachineId), str(kmsRequest['skuId'].get()), int(time.time()))
-        # --------------------------------------------------------------------
-        # YENİ KOD BLOĞUNUN SONU
-        # --------------------------------------------------------------------
-
-        # Mevcut kod buradan devam ediyor...
+                    # Yeni istemciyi `activations` tablosuna SkuId bilgisiyle ekle
+                    sql_add_client_activation(self.srv_config['sqlite'], str(clientMachineId), str(skuId), int(time.time()))
                                         
                 applicationId = kmsRequest['applicationId'].get()
-                skuId = kmsRequest['skuId'].get()
+
                 requestDatetime = filetime_to_dt(kmsRequest['requestTime'])
                                 
                 # Localize the request time, if module "tzlocal" is available.

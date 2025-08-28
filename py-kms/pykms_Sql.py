@@ -18,7 +18,6 @@ loggersrv = logging.getLogger('logsrv')
 
 def sql_initialize(dbName):
         if not os.path.isfile(dbName):
-                # Initialize the database.
                 loggersrv.debug(f'Initializing database file "{dbName}"...')
                 con = None
                 try:
@@ -26,6 +25,13 @@ def sql_initialize(dbName):
                         cur = con.cursor()
                         cur.execute("CREATE TABLE clients(clientMachineId TEXT , machineName TEXT, applicationId TEXT, skuId TEXT, licenseStatus TEXT, lastRequestTime INTEGER, kmsEpid TEXT, requestCount INTEGER, PRIMARY KEY(clientMachineId, applicationId))")
                         cur.execute("CREATE TABLE activations(clientMachineId TEXT PRIMARY KEY, skuId TEXT, activationTime INTEGER)")
+                        cur.execute("CREATE TABLE config(skuId TEXT PRIMARY KEY, activation_limit INTEGER)")
+                        # Default limit
+                        cur.execute("INSERT INTO config (skuId, activation_limit) VALUES (?, ?)", ('default', 0))
+                        # Office Professional Plus 2024 LTSC
+                        cur.execute("INSERT INTO config (skuId, activation_limit) VALUES (?, ?)", ('8d368fc1-9470-4be2-8d66-90e836cbb051', 40))
+                        # 10/11 Pro
+                        cur.execute("INSERT INTO config (skuId, activation_limit) VALUES (?, ?)", ('2de67392-b7a7-462a-b1ca-108dd189f588', 13))
 
                 except sqlite3.Error as e:
                         pretty_printer(log_obj = loggersrv.error, to_exit = True, put_text = "{reverse}{red}{bold}Sqlite Error: %s. Exiting...{end}" %str(e))
@@ -147,3 +153,25 @@ def sql_update_client_activation_time(dbName, clientMachineId, activationTime):
         cur.execute("UPDATE activations SET activationTime=? WHERE clientMachineId=?",
                     (activationTime, clientMachineId))
         con.commit()
+
+def sql_get_sku_limit(dbName, skuId):
+    """ Belirli bir SkuId için tanımlanmış limiti, yoksa varsayılan limiti döndürür. """
+    with sqlite3.connect(dbName) as con:
+        cur = con.cursor()
+        # Önce SkuId'ye özel bir limit var mı diye bak
+        cur.execute("SELECT activation_limit FROM config WHERE skuId=?", (skuId,))
+        result = cur.fetchone()
+        if result:
+            return result[0]
+
+        # Özel limit yoksa, 'default' limiti döndür
+        cur.execute("SELECT activation_limit FROM config WHERE skuId=?", ('default',))
+        result = cur.fetchone()
+        return result[0] if result else None
+
+def sql_count_activations_by_sku(dbName, skuId):
+    """ Belirli bir SkuId için yapılmış toplam aktivasyon sayısını döndürür. """
+    with sqlite3.connect(dbName) as con:
+        cur = con.cursor()
+        cur.execute("SELECT COUNT(*) FROM activations WHERE skuId=?", (skuId,))
+        return cur.fetchone()[0]
